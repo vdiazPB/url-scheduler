@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request, render_template_string
 from apscheduler.schedulers.background import BackgroundScheduler
 import requests, time, threading
 from datetime import datetime
+import os
 
 app = Flask(__name__)
 
@@ -26,6 +27,8 @@ URL_ENTRIES = [
 auto_run_enabled = True
 scheduled_hour, scheduled_minute = 4, 0
 log = []
+scheduler = BackgroundScheduler()
+scheduler.start()
 
 def trigger_urls():
     for idx, (_, url) in enumerate(URL_ENTRIES):
@@ -54,15 +57,12 @@ def trigger_by_name(name):
     except Exception as e:
         log.append(f"[{ts}] ERR {url} → {e}")
 
-scheduler = BackgroundScheduler()
-scheduler.add_job(lambda: trigger_urls() if auto_run_enabled else None,
-                  "cron", hour=scheduled_hour, minute=scheduled_minute)
-scheduler.start()
-
+# ── Flask Routes ─────────────────────────────────────────────────────
 @app.route("/")
 def index():
     options = ''.join(f'<option value="{name}">{name}</option>' for name, _ in URL_ENTRIES)
-    return render_template_string(TEMPLATE, loc_opts=options)
+    weekdays = ''.join(f'<option value="{i}">{d}</option>' for i, d in enumerate(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]))
+    return render_template_string(TEMPLATE, loc_opts=options, day_opts=weekdays)
 
 @app.route("/log")
 def get_log(): return jsonify(log[-50:])
@@ -87,10 +87,26 @@ def change_time():
     data = request.get_json()
     scheduled_hour = int(data["hour"])
     scheduled_minute = int(data["minute"])
-    scheduler.reschedule_job(scheduler.get_jobs()[0].id, trigger="cron",
-                             hour=scheduled_hour, minute=scheduled_minute)
+    scheduler.reschedule_job("daily-run", trigger="cron", hour=scheduled_hour, minute=scheduled_minute)
     return jsonify(hour=scheduled_hour, minute=scheduled_minute)
 
+@app.route("/schedule-one", methods=["POST"])
+def schedule_one():
+    data = request.get_json()
+    name = data['name']
+    weekday = int(data['weekday'])  # 0=Monday
+    hour = int(data['hour'])
+    ampm = data['ampm']
+    if ampm == 'PM' and hour < 12: hour += 12
+    if ampm == 'AM' and hour == 12: hour = 0
+    job_id = f"job-{name.replace(' ', '_')}-{weekday}-{hour}"
+    scheduler.add_job(lambda: trigger_by_name(name), 'cron', day_of_week=weekday, hour=hour, id=job_id, replace_existing=True)
+    log.append(f"[Scheduler] ⏰ Scheduled {name} on {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][weekday]} at {hour:02d}:00")
+    return '', 204
+
+scheduler.add_job(lambda: trigger_urls() if auto_run_enabled else None, "cron", hour=scheduled_hour, minute=scheduled_minute, id="daily-run")
+
+# ── HTML Template ─────────────────────────────────────────────────────
 TEMPLATE = '''
 <!DOCTYPE html><html><head><title>URL Scheduler</title>
 <style>
@@ -112,7 +128,7 @@ TEMPLATE = '''
 <div class='section'>
   <p>⏰ <b>Auto-run Time:</b> change below:</p>
   <form onsubmit="event.preventDefault();setTime()">
-    <input id='h' size='2' value='4'>:<input id='m' size='2' value='00'>
+    <input id='h' size='2' value='4'>
     <select id='ampm'><option>AM</option><option>PM</option></select>
     <button>Set Time</button>
   </form>
@@ -130,6 +146,18 @@ TEMPLATE = '''
 <div class='section'>
   <p>🚀 <b>Run All URLs Now:</b></p>
   <button onclick="confirmRunAll()">Run</button>
+</div>
+<div class='section'>
+  <p>🕒 <b>Schedule a Location by Weekday & Hour:</b></p>
+  <form onsubmit="event.preventDefault(); scheduleOne()">
+    <select id='day'>{{ day_opts | safe }}</select>
+    <select id='locname'>{{ loc_opts | safe }}</select>
+    <select id='hour'>
+      {% for i in range(1,13) %}<option>{{ i }}</option>{% endfor %}
+    </select>
+    <select id='ampm2'><option>AM</option><option>PM</option></select>
+    <button>Schedule</button>
+  </form>
 </div>
 <div class='section'><h4>📜 Logs</h4><pre id='logbox'>Loading…</pre></div>
 <script>
@@ -150,19 +178,26 @@ function toggleAutoRun() {
     .then(r => r.json()).then(d => alert('Auto-run is now: ' + d.status));
 }
 function setTime() {
-  let hVal = parseInt(h.value), mVal = parseInt(m.value), ap = ampm.value;
+  let hVal = parseInt(h.value), ap = ampm.value;
   if (ap === 'PM' && hVal < 12) hVal += 12;
   if (ap === 'AM' && hVal === 12) hVal = 0;
   fetch('/change-time', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ hour: hVal, minute: mVal })
+    body: JSON.stringify({ hour: hVal, minute: 0 })
   }).then(() => alert('Time updated'));
+}
+function scheduleOne() {
+  let name = locname.value, weekday = day.value, hour = hour.value, ap = ampm2.value;
+  fetch('/schedule-one', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name, weekday: weekday, hour: hour, ampm: ap })
+  }).then(() => alert('Schedule created'));
 }
 </script></body></html>
 '''
 
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=True)

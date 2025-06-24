@@ -3,88 +3,183 @@
 <head>
   <title>URL Scheduler</title>
   <style>
-    body { font-family: Arial; background: #f4f4f4; padding: 20px; }
-    button { background: #007bff; color: #fff; border: none; padding: 10px; margin: 5px; border-radius: 5px; cursor: pointer; }
-    button:hover { background: #0056b3; }
-    pre { background: #222; color: #0f0; padding: 10px; border-radius: 5px; max-height: 300px; overflow-y: scroll; }
-    select, input[type="number"], select#ampmSelect { padding: 5px; margin: 5px; }
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f4f4;
+      padding: 20px;
+      color: #333;
+    }
+    button {
+      background: #007bff;
+      color: #fff;
+      border: none;
+      padding: 10px 15px;
+      margin: 5px;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #aaa;
+      cursor: not-allowed;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    select, input[type="number"] {
+      padding: 6px;
+      margin: 5px;
+    }
+    pre {
+      background: #222;
+      color: #0f0;
+      padding: 10px;
+      border-radius: 5px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 34px;
+    }
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      background-color: #ccc;
+      transition: .4s;
+      top: 0; left: 0; right: 0; bottom: 0;
+      border-radius: 34px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 26px; width: 26px;
+      left: 4px; bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+    input:checked + .slider {
+      background-color: #28a745;
+    }
+    input:checked + .slider:before {
+      transform: translateX(26px);
+    }
   </style>
 </head>
 <body>
-  <h2>URL Scheduler</h2>
+  <h2>📅 URL Scheduler</h2>
 
   <div>
-    <h3>Trigger All URLs</h3>
-    <button id="btnAll">Run All</button>
+    <h3>🔁 Auto Scheduler</h3>
+    <label class="toggle-switch">
+      <input type="checkbox" id="autoToggle" {{ 'checked' if auto_run_enabled else '' }}>
+      <span class="slider"></span>
+    </label>
+    <p><strong>Current Auto-Run Time:</strong> {{ current_time }}</p>
+    <div>
+      <label>Update Auto-Run Time:</label>
+      <input id="hourPicker" type="number" min="1" max="12" value="4">
+      <select id="ampmSelect">
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+      <button onclick="updateTime()">Update</button>
+    </div>
   </div>
 
   <div>
-    <h3>Trigger by Location</h3>
-    <select id="loc">
-      {% for opt in loc_opts %}
-        <option value="{{ opt }}">{{ opt }}</option>
+    <h3>▶ Run Now</h3>
+    <button id="runAllBtn">Run All URLs</button>
+  </div>
+
+  <div>
+    <h3>📍 Trigger by Location</h3>
+    <select id="locationSelect">
+      {% for loc in loc_opts %}
+        <option value="{{ loc }}">{{ loc }}</option>
       {% endfor %}
     </select>
-    <button id="btnOne">Go</button>
+    <button id="triggerOneBtn">Run</button>
   </div>
 
   <div>
-    <h3>Current Auto-Run Time</h3>
-    <p><strong>{{ current_time }}</strong></p>
-    <h4>Update Auto-Run Time</h4>
-    <input id="hourPicker" type="number" min="1" max="12" value="4">
-    <select id="ampmSelect">
-      <option value="AM">AM</option>
-      <option value="PM">PM</option>
-    </select>
-    <button onclick="if(confirm('Are you sure you want to update the schedule?')) updateTime()">Update Time</button>
+    <h3>📝 Logs</h3>
+    <pre id="logBox">Loading logs...</pre>
   </div>
 
-  <div>
-    <h3>Logs</h3>
-    <pre id="logbox">Loading...</pre>
-  </div>
-
-  <script type="text/javascript">
-    const logbox = document.getElementById('logbox');
-    const btnAll = document.getElementById('btnAll');
-    const btnOne = document.getElementById('btnOne');
-    const loc = document.getElementById('loc');
-    const hourPicker = document.getElementById('hourPicker');
-    const ampmSelect = document.getElementById('ampmSelect');
+  <script>
+    const runAllBtn = document.getElementById("runAllBtn");
+    const triggerOneBtn = document.getElementById("triggerOneBtn");
+    const locationSelect = document.getElementById("locationSelect");
+    const autoToggle = document.getElementById("autoToggle");
+    const hourPicker = document.getElementById("hourPicker");
+    const ampmSelect = document.getElementById("ampmSelect");
+    const logBox = document.getElementById("logBox");
 
     function refreshLog() {
-      fetch('/log')
+      fetch("/log")
         .then(r => r.json())
-        .then(d => logbox.textContent = d.join("\n"));
+        .then(data => {
+          logBox.textContent = data.join("\n");
+        });
     }
+
     setInterval(refreshLog, 3000);
     refreshLog();
 
-    btnAll.onclick = () => {
-      if (confirm("Are you sure you want to trigger all URLs?")) {
-        btnAll.disabled = true;
-        fetch('/trigger', { method: 'POST' })
-          .then(() => btnAll.disabled = false);
-      }
+    runAllBtn.onclick = () => {
+      runAllBtn.disabled = true;
+      fetch("/trigger", { method: "POST" })
+        .then(() => {
+          runAllBtn.disabled = false;
+        })
+        .catch(() => {
+          alert("Failed to trigger URLs.");
+          runAllBtn.disabled = false;
+        });
     };
 
-    btnOne.onclick = () => {
-      const name = loc.value;
-      btnOne.disabled = true;
-      fetch('/trigger-name/' + encodeURIComponent(name), { method: 'POST' })
-        .then(() => btnOne.disabled = false);
+    triggerOneBtn.onclick = () => {
+      const location = locationSelect.value;
+      triggerOneBtn.disabled = true;
+      fetch(`/trigger-name/${encodeURIComponent(location)}`, { method: "POST" })
+        .then(() => {
+          triggerOneBtn.disabled = false;
+        })
+        .catch(() => {
+          alert("Failed to trigger location.");
+          triggerOneBtn.disabled = false;
+        });
     };
 
     function updateTime() {
       const hour = parseInt(hourPicker.value);
       const ampm = ampmSelect.value;
-      fetch('/update-time', {
-        method: 'POST',
+      if (!hour || hour < 1 || hour > 12) return alert("Enter valid hour.");
+      fetch("/update-time", {
+        method: "POST",
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ hour, ampm })
-      });
+      }).then(() => alert("Auto-run time updated"));
     }
+
+    autoToggle.onchange = () => {
+      const enabled = autoToggle.checked;
+      fetch("/toggle-auto", {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      }).then(() => {
+        alert(`Auto-run ${enabled ? "enabled" : "disabled"}`);
+      });
+    };
   </script>
 </body>
 </html>

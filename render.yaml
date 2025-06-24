@@ -2,6 +2,9 @@ services:
   - type: web
     name: url-scheduler
     env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python app.py"
+    buildCommand: ""
+    startCommand: python app.py
     plan: free
+    envVars:
+      - key: PORT
+        value: 5000
